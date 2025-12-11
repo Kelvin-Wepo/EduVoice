@@ -27,6 +27,8 @@ export const DocumentDetail: React.FC = () => {
   const [converting, setConverting] = useState(false);
   const [selectedTTSEngine, setSelectedTTSEngine] = useState<'gtts' | 'elevenlabs' | 'gemini'>('gtts');
   const [showGeminiReader, setShowGeminiReader] = useState(false);
+  const [autoPlayAudio, setAutoPlayAudio] = useState(false);
+  const audioSectionRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (id) {
@@ -48,6 +50,9 @@ export const DocumentDetail: React.FC = () => {
         } catch (error) {
           console.log('No audio file yet');
         }
+      } else {
+        // Reset autoPlay if no audio file
+        setAutoPlayAudio(false);
       }
     } catch (error) {
       console.error('Failed to load document:', error);
@@ -70,9 +75,15 @@ export const DocumentDetail: React.FC = () => {
       
       toast.success('Conversion started! Check back in a few moments.', { id: 'convert' });
       
-      // Reload data after a few seconds
+      // Reload data after a few seconds to get the converted audio
       setTimeout(() => {
         loadDocumentData();
+        // Enable auto-play after reload
+        setAutoPlayAudio(true);
+        // Scroll to audio section
+        setTimeout(() => {
+          audioSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 1000);
       }, 3000);
     } catch (error: any) {
       console.error('Failed to convert document:', error);
@@ -215,9 +226,14 @@ export const DocumentDetail: React.FC = () => {
 
       {/* Audio Section */}
       {audioFile ? (
-        <div className="space-y-4">
+        <div ref={audioSectionRef} className="space-y-4 animate-fadeIn">
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900">Audio Version</h2>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Audio Version</h2>
+              {autoPlayAudio && (
+                <p className="text-sm text-green-600 font-semibold mt-1">🎉 Auto-playing your audio...</p>
+              )}
+            </div>
             <div className="flex items-center space-x-3">
               <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
                 ✓ Available
@@ -231,7 +247,14 @@ export const DocumentDetail: React.FC = () => {
               </button>
             </div>
           </div>
-          <AudioPlayer audio={audioFile} />
+          <AudioPlayer audio={audioFile} autoPlay={autoPlayAudio} />
+          {autoPlayAudio && (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-4 border-l-4 border-green-500">
+              <p className="text-green-800 text-sm">
+                Your audio is ready! It's playing automatically. You can pause, adjust volume, or download it anytime.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-2xl p-8 shadow-lg border-2 border-gray-100">
