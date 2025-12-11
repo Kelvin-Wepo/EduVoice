@@ -21,15 +21,21 @@ try:
 except ImportError:
     ELEVENLABS_AVAILABLE = False
 
-# Gemini placeholder availability flag (we don't install a Gemini SDK here)
-# If you integrate an official Gemini SDK, replace this with a proper import and set to True
-GEMINI_AVAILABLE = bool(getattr(settings, 'GEMINI_API_KEY', ''))
+# Check if Gemini is available
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+# Gemini availability flag
+GEMINI_CONFIGURED = bool(getattr(settings, 'GEMINI_API_KEY', ''))
 
 
 @shared_task(bind=True, max_retries=3)
-def convert_document_to_audio(self, document_id, user_id, voice_type='female', speech_rate=1.0, language='en', use_elevenlabs=False):
+def convert_document_to_audio(self, document_id, user_id, voice_type='female', speech_rate=1.0, language='en', use_elevenlabs=False, use_gemini=False):
     """
-    Convert document text to audio using Google TTS or ElevenLabs.
+    Convert document text to audio using gTTS, ElevenLabs, or Gemini.
     
     Args:
         document_id: Document ID to convert
@@ -38,6 +44,7 @@ def convert_document_to_audio(self, document_id, user_id, voice_type='female', s
         speech_rate: Speech rate (0.5 to 2.0)
         language: Language code
         use_elevenlabs: Use ElevenLabs instead of Google TTS
+        use_gemini: Use Gemini (prioritized if available)
     """
     try:
         # Get document
@@ -59,12 +66,11 @@ def convert_document_to_audio(self, document_id, user_id, voice_type='female', s
         if not text or len(text.strip()) == 0:
             raise ValueError("No text content found in document")
         
-        # Choose TTS engine
-        if use_elevenlabs and ELEVENLABS_AVAILABLE and getattr(settings, 'ELEVENLABS_API_KEY', ''):
+        # Choose TTS engine (Gemini > ElevenLabs > gTTS)
+        if use_gemini and GEMINI_AVAILABLE and GEMINI_CONFIGURED:
+            temp_path = generate_audio_gemini(text, voice_type, speech_rate, language)
+        elif use_elevenlabs and ELEVENLABS_AVAILABLE and getattr(settings, 'ELEVENLABS_API_KEY', ''):
             temp_path = generate_audio_elevenlabs(text, voice_type, language)
-        elif 'use_gemini' in self.request.kwargs and GEMINI_AVAILABLE:
-            # Placeholder for Gemini-based TTS
-            temp_path = generate_audio_gemini(text, voice_type, language)
         else:
             temp_path = generate_audio_gtts(text, voice_type, speech_rate, language)
         
@@ -169,17 +175,80 @@ def generate_audio_elevenlabs(text, voice_type, language='en'):
     return temp_path
 
 
-def generate_audio_gemini(text, voice_type, language='en'):
-    """Placeholder for Gemini-based TTS.
-
-    Currently a stub. If you integrate Google's Gemini TTS or an API that exposes
-    audio generation, implement the call here. For now this raises an error so that
-    the system falls back or logs a clear message.
+def generate_audio_gemini(text, voice_type, speech_rate, language='en'):
+    """Generate audio using Google Gemini.
+    
+    Uses Gemini to enhance/summarize text, then converts to audio via gTTS.
+    This provides better quality output by processing the text through an LLM first.
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.warning('generate_audio_gemini called but no Gemini integration is implemented.')
-    raise NotImplementedError('Gemini TTS integration is not implemented. Please integrate the SDK or API client and set GEMINI_API_KEY in settings.')
+    
+    if not GEMINI_AVAILABLE or not GEMINI_CONFIGURED:
+        logger.warning('Gemini not configured. Falling back to gTTS.')
+        return generate_audio_gtts(text, voice_type, speech_rate, language)
+    
+    try:
+        # Configure Gemini API
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        
+        # Use Gemini to enhance/improve the text for better TTS output
+        # Request Gemini to clean up the text and make it more suitable for speech
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Create a prompt to enhance text for TTS
+        prompt = f"""Please reformat the following text to be more suitable for text-to-speech conversion. 
+        Make sure to:
+        1. Break long sentences into shorter ones
+        2. Replace abbreviations with full words
+        3. Add natural pauses where appropriate (use periods and commas)
+        4. Keep the meaning intact
+        5. Make it sound natural when read aloud
+        
+        Text to reformat:
+        {text[:3000]}  # Limit to first 3000 chars to stay within API limits
+        
+        Reforematted text (just the text, no explanations):"""
+        
+        # Call Gemini to enhance text
+        response = model.generate_content(prompt)
+        enhanced_text = response.text if response else text
+        
+        logger.info(f'Gemini enhanced text for TTS (original: {len(text)} chars, enhanced: {len(enhanced_text)} chars)')
+        
+        # Now use gTTS with the enhanced text
+        # This combines Gemini's text processing with gTTS's audio generation
+        tts = gTTS(text=enhanced_text, lang=language, slow=(speech_rate < 1.0))
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+            temp_path = temp_file.name
+            tts.save(temp_path)
+        
+        # Adjust speed if needed
+        if speech_rate != 1.0:
+            audio = AudioSegment.from_mp3(temp_path)
+            
+            if speech_rate > 1.0:
+                audio = audio.speedup(playback_speed=speech_rate)
+            else:
+                audio = audio._spawn(audio.raw_data, overrides={
+                    "frame_rate": int(audio.frame_rate * speech_rate)
+                })
+                audio = audio.set_frame_rate(44100)
+            
+            adjusted_path = temp_path.replace('.mp3', '_adjusted.mp3')
+            audio.export(adjusted_path, format='mp3')
+            os.remove(temp_path)
+            temp_path = adjusted_path
+        
+        logger.info(f'Gemini-enhanced audio generated successfully')
+        return temp_path
+        
+    except Exception as e:
+        logger.error(f'Gemini TTS conversion failed: {str(e)}. Falling back to gTTS.')
+        # Fallback to gTTS if Gemini fails
+        return generate_audio_gtts(text, voice_type, speech_rate, language)
 
 
 @shared_task
