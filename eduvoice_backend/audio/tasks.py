@@ -21,6 +21,10 @@ try:
 except ImportError:
     ELEVENLABS_AVAILABLE = False
 
+# Gemini placeholder availability flag (we don't install a Gemini SDK here)
+# If you integrate an official Gemini SDK, replace this with a proper import and set to True
+GEMINI_AVAILABLE = bool(getattr(settings, 'GEMINI_API_KEY', ''))
+
 
 @shared_task(bind=True, max_retries=3)
 def convert_document_to_audio(self, document_id, user_id, voice_type='female', speech_rate=1.0, language='en', use_elevenlabs=False):
@@ -56,8 +60,11 @@ def convert_document_to_audio(self, document_id, user_id, voice_type='female', s
             raise ValueError("No text content found in document")
         
         # Choose TTS engine
-        if use_elevenlabs and ELEVENLABS_AVAILABLE and hasattr(settings, 'ELEVENLABS_API_KEY'):
+        if use_elevenlabs and ELEVENLABS_AVAILABLE and getattr(settings, 'ELEVENLABS_API_KEY', ''):
             temp_path = generate_audio_elevenlabs(text, voice_type, language)
+        elif 'use_gemini' in self.request.kwargs and GEMINI_AVAILABLE:
+            # Placeholder for Gemini-based TTS
+            temp_path = generate_audio_gemini(text, voice_type, language)
         else:
             temp_path = generate_audio_gtts(text, voice_type, speech_rate, language)
         
@@ -160,6 +167,19 @@ def generate_audio_elevenlabs(text, voice_type, language='en'):
             temp_file.write(segment)
     
     return temp_path
+
+
+def generate_audio_gemini(text, voice_type, language='en'):
+    """Placeholder for Gemini-based TTS.
+
+    Currently a stub. If you integrate Google's Gemini TTS or an API that exposes
+    audio generation, implement the call here. For now this raises an error so that
+    the system falls back or logs a clear message.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning('generate_audio_gemini called but no Gemini integration is implemented.')
+    raise NotImplementedError('Gemini TTS integration is not implemented. Please integrate the SDK or API client and set GEMINI_API_KEY in settings.')
 
 
 @shared_task
