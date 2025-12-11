@@ -1,0 +1,101 @@
+[
+  {
+    "model": "users.customuser",
+    "pk": 1,
+    "fields": {
+      "username": "admin",
+      "email": "admin@eduvoice.com",
+      "password": "pbkdf2_sha256$600000$xxxxxxxxxxx",
+      "first_name": "Admin",
+      "last_name": "User",
+      "role": "admin",
+      "email_verified": true,
+      "is_staff": true,
+      "is_superuser": true,
+      "is_active": true
+    }
+  },
+  {
+    "model": "users.customuser",
+    "pk": 2,
+    "fields": {
+      "username": "teacher1",
+      "email": "teacher@eduvoice.com",
+      "password": "pbkdf2_sha256$600000$xxxxxxxxxxx",
+      "first_name": "Jane",
+      "last_name": "Teacher",
+      "role": "teacher",
+      "email_verified": true,
+      "is_active": true
+    }
+  },
+  {
+    "model": "users.customuser",
+    "pk": 3,
+    "fields": {
+      "username": "student1",
+      "email": "student@eduvoice.com",
+      "password": "pbkdf2_sha256$600000$xxxxxxxxxxx",
+      "first_name": "John",
+      "last_name": "Student",
+      "role": "student",
+      "email_verified": true,
+      "is_active": true
+    }
+  },
+  {
+    "model": "documents.course",
+    "pk": 1,
+    "fields": {
+      "name": "Introduction to Computer Science",
+      "code": "CS101",
+      "description": "Fundamentals of computer science and programming",
+      "created_by": 2,
+      "is_active": true
+    }
+  },
+  {
+    "model": "documents.course",
+    "pk": 2,
+    "fields": {
+      "name": "English Literature",
+      "code": "ENG201",
+      "description": "Study of classic and modern literature",
+      "created_by": 2,
+      "is_active": true
+    }
+  },
+  {
+    "model": "documents.course",
+    "pk": 3,
+    "fields": {
+      "name": "Mathematics 101",
+      "code": "MATH101",
+      "description": "Introduction to algebra and calculus",
+      "created_by": 2,
+      "is_active": true
+    }
+  },
+  {
+    "model": "documents.course",
+    "pk": 4,
+    "fields": {
+      "name": "World History",
+      "code": "HIST101",
+      "description": "Overview of world historical events",
+      "created_by": 2,
+      "is_active": true
+    }
+  },
+  {
+    "model": "documents.course",
+    "pk": 5,
+    "fields": {
+      "name": "Biology Fundamentals",
+      "code": "BIO101",
+      "description": "Basic principles of biology and life sciences",
+      "created_by": 2,
+      "is_active": true
+    }
+  }
+]
