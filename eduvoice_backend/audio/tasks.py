@@ -197,27 +197,39 @@ def generate_audio_gemini(text, voice_type, speech_rate, language='en'):
         model = genai.GenerativeModel('gemini-pro')
         
         # Create a prompt to enhance text for TTS
-        prompt = f"""Please reformat the following text to be more suitable for text-to-speech conversion. 
-        Make sure to:
-        1. Break long sentences into shorter ones
-        2. Replace abbreviations with full words
-        3. Add natural pauses where appropriate (use periods and commas)
-        4. Keep the meaning intact
-        5. Make it sound natural when read aloud
-        
-        Text to reformat:
-        {text[:3000]}  # Limit to first 3000 chars to stay within API limits
-        
-        Reforematted text (just the text, no explanations):"""
+        prompt = f"""You are an expert in preparing text for text-to-speech conversion.
+Please reformat the following text to sound natural when read aloud. Follow these rules:
+1. Break long sentences into shorter ones (max 20 words per sentence)
+2. Replace abbreviations with full words (e.g., Dr. becomes Doctor, etc. becomes and so on)
+3. Add natural pauses using periods and commas appropriately
+4. Keep the original meaning and all important information
+5. Make it conversational and easy to understand
+6. Return ONLY the reformatted text with no explanations
+
+Text to reformat:
+{text[:3000]}
+
+Reformatted text:"""
         
         # Call Gemini to enhance text
-        response = model.generate_content(prompt)
-        enhanced_text = response.text if response else text
+        logger.info('Calling Gemini API to enhance text for TTS...')
+        response = model.generate_content(prompt, safety_settings=[
+            {
+                "category": "HARM_CATEGORY_UNSPECIFIED",
+                "threshold": "BLOCK_NONE"
+            },
+        ])
         
-        logger.info(f'Gemini enhanced text for TTS (original: {len(text)} chars, enhanced: {len(enhanced_text)} chars)')
+        if not response or not response.text:
+            logger.warning('Gemini returned empty response. Using original text.')
+            enhanced_text = text
+        else:
+            enhanced_text = response.text.strip()
+            logger.info(f'Gemini enhanced text for TTS (original: {len(text)} chars, enhanced: {len(enhanced_text)} chars)')
         
         # Now use gTTS with the enhanced text
         # This combines Gemini's text processing with gTTS's audio generation
+        logger.info('Generating audio with gTTS...')
         tts = gTTS(text=enhanced_text, lang=language, slow=(speech_rate < 1.0))
         
         # Save to temporary file
@@ -242,11 +254,11 @@ def generate_audio_gemini(text, voice_type, speech_rate, language='en'):
             os.remove(temp_path)
             temp_path = adjusted_path
         
-        logger.info(f'Gemini-enhanced audio generated successfully')
+        logger.info(f'Gemini-enhanced audio generated successfully at {temp_path}')
         return temp_path
         
     except Exception as e:
-        logger.error(f'Gemini TTS conversion failed: {str(e)}. Falling back to gTTS.')
+        logger.error(f'Gemini TTS conversion failed: {str(e)}. Falling back to gTTS.', exc_info=True)
         # Fallback to gTTS if Gemini fails
         return generate_audio_gtts(text, voice_type, speech_rate, language)
 
