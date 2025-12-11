@@ -156,6 +156,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         voice_type = request.data.get('voice_type', request.user.preferred_voice_type)
         speech_rate = request.data.get('speech_rate', request.user.preferred_speech_rate)
         language = request.data.get('language', request.user.preferred_language)
+        engine = request.data.get('engine', 'gtts')  # New parameter
         
         # Check if document has extracted text
         if not document.extracted_text:
@@ -164,13 +165,19 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Map engine to conversion flags
+        use_elevenlabs = engine == 'elevenlabs'
+        use_gemini = engine == 'gemini'
+        
         # Trigger Celery task
         task = convert_document_to_audio.delay(
             document_id=document.id,
             user_id=request.user.id,
             voice_type=voice_type,
             speech_rate=speech_rate,
-            language=language
+            language=language,
+            use_elevenlabs=use_elevenlabs,
+            use_gemini=use_gemini
         )
         
         return Response({

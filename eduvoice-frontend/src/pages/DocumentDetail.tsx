@@ -24,6 +24,7 @@ export const DocumentDetail: React.FC = () => {
   const [audioFile, setAudioFile] = useState<AudioFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
+  const [selectedTTSEngine, setSelectedTTSEngine] = useState<'gtts' | 'elevenlabs' | 'gemini'>('gtts');
 
   useEffect(() => {
     if (id) {
@@ -59,9 +60,11 @@ export const DocumentDetail: React.FC = () => {
 
     try {
       setConverting(true);
-      toast.loading('Converting document to audio...', { id: 'convert' });
+      toast.loading(`Converting document to audio using ${selectedTTSEngine.toUpperCase()}...`, { id: 'convert' });
       
-      const audioData = await documentsAPI.convert(document.id);
+      const audioData = await documentsAPI.convert(document.id, {
+        engine: selectedTTSEngine
+      });
       
       toast.success('Conversion started! Check back in a few moments.', { id: 'convert' });
       
@@ -256,6 +259,73 @@ export const DocumentDetail: React.FC = () => {
                 </div>
                 <h3 className="font-semibold text-green-900 mb-1">Download</h3>
                 <p className="text-sm text-green-700">Listen offline anytime</p>
+              </div>
+            </div>
+
+            {/* TTS Engine Selection */}
+            <div className="mb-8 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                <Sparkles size={20} className="text-indigo-600" />
+                <span>Choose Audio Engine</span>
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* gTTS Option */}
+                <label className="flex items-center p-4 border-2 rounded-xl cursor-pointer transition-all" style={{
+                  borderColor: selectedTTSEngine === 'gtts' ? '#4f46e5' : '#d1d5db',
+                  backgroundColor: selectedTTSEngine === 'gtts' ? '#eef2ff' : '#ffffff'
+                }}>
+                  <input
+                    type="radio"
+                    name="tts-engine"
+                    value="gtts"
+                    checked={selectedTTSEngine === 'gtts'}
+                    onChange={(e) => setSelectedTTSEngine(e.target.value as 'gtts' | 'elevenlabs' | 'gemini')}
+                    className="w-4 h-4 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="ml-3 flex-1">
+                    <p className="font-semibold text-gray-900">gTTS (Free)</p>
+                    <p className="text-xs text-gray-600 mt-1">Fast & reliable. Standard voice quality.</p>
+                  </div>
+                </label>
+
+                {/* ElevenLabs Option */}
+                <label className="flex items-center p-4 border-2 rounded-xl cursor-pointer transition-all" style={{
+                  borderColor: selectedTTSEngine === 'elevenlabs' ? '#4f46e5' : '#d1d5db',
+                  backgroundColor: selectedTTSEngine === 'elevenlabs' ? '#eef2ff' : '#ffffff'
+                }}>
+                  <input
+                    type="radio"
+                    name="tts-engine"
+                    value="elevenlabs"
+                    checked={selectedTTSEngine === 'elevenlabs'}
+                    onChange={(e) => setSelectedTTSEngine(e.target.value as 'gtts' | 'elevenlabs' | 'gemini')}
+                    className="w-4 h-4 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="ml-3 flex-1">
+                    <p className="font-semibold text-gray-900">ElevenLabs (Premium)</p>
+                    <p className="text-xs text-gray-600 mt-1">High-quality voices. Natural & expressive.</p>
+                  </div>
+                </label>
+
+                {/* Gemini Option */}
+                <label className="flex items-center p-4 border-2 rounded-xl cursor-pointer transition-all" style={{
+                  borderColor: selectedTTSEngine === 'gemini' ? '#4f46e5' : '#d1d5db',
+                  backgroundColor: selectedTTSEngine === 'gemini' ? '#eef2ff' : '#ffffff'
+                }}>
+                  <input
+                    type="radio"
+                    name="tts-engine"
+                    value="gemini"
+                    checked={selectedTTSEngine === 'gemini'}
+                    onChange={(e) => setSelectedTTSEngine(e.target.value as 'gtts' | 'elevenlabs' | 'gemini')}
+                    className="w-4 h-4 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="ml-3 flex-1">
+                    <p className="font-semibold text-gray-900">Gemini AI (Enhanced)</p>
+                    <p className="text-xs text-gray-600 mt-1">AI-enhanced text. Better pacing & clarity.</p>
+                  </div>
+                </label>
               </div>
             </div>
 

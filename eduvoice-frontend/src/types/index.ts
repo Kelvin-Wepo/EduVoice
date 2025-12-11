@@ -121,6 +121,7 @@ export interface ConversionRequest {
   voice_type?: string;
   speech_rate?: number;
   language?: string;
+  engine?: 'gtts' | 'elevenlabs' | 'gemini';
 }
 
 export interface ConversionResponse {
