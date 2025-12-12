@@ -3,6 +3,7 @@ Celery tasks for audio conversion.
 """
 import os
 import tempfile
+import logging
 from celery import shared_task
 from django.conf import settings
 from django.core.files import File
@@ -14,9 +15,11 @@ from documents.models import Document
 from audio.models import AudioFile
 from users.models import AudioPreference
 
+logger = logging.getLogger(__name__)
+
 # Check if ElevenLabs is available
 try:
-    from elevenlabs import generate, set_api_key, voices
+    from elevenlabs import generate, set_api_key
     ELEVENLABS_AVAILABLE = True
 except ImportError:
     ELEVENLABS_AVAILABLE = False
@@ -46,6 +49,9 @@ def convert_document_to_audio(self, document_id, user_id, voice_type='female', s
         use_elevenlabs: Use ElevenLabs instead of Google TTS
         use_gemini: Use Gemini (prioritized if available)
     """
+    audio_file = None
+    temp_path = None
+    
     try:
         # Get document
         document = Document.objects.get(id=document_id)
@@ -91,22 +97,41 @@ def convert_document_to_audio(self, document_id, user_id, voice_type='female', s
         audio_file.save()
         
         # Clean up temp file
-        os.remove(temp_path)
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
         
         # Send email notification
         send_conversion_complete_email.delay(user_id, document.title, audio_file.id)
         
-        return {'status': 'success', 'audio_id': audio_file.id}
+        return {'status': 'success', 'audio_id': audio_file.id, 'duration': duration}
+        
+    except Document.DoesNotExist:
+        logger.error(f'Document {document_id} not found')
+        return {'status': 'error', 'message': 'Document not found'}
         
     except Exception as e:
-        audio_file.status = AudioFile.Status.FAILED
-        audio_file.error_message = str(e)
-        audio_file.save()
+        logger.error(f'Error converting document to audio: {str(e)}', exc_info=True)
+        
+        if audio_file:
+            audio_file.status = AudioFile.Status.FAILED
+            audio_file.error_message = str(e)
+            audio_file.save()
+        
+        # Clean up temp file if it exists
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        
+        # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
 
 
 def generate_audio_gtts(text, voice_type, speech_rate, language):
     """Generate audio using Google TTS."""
+    logger.info('Generating audio with gTTS')
+    
     # Note: gTTS has limited voice options
     tts = gTTS(text=text, lang=language, slow=(speech_rate < 1.0))
     
@@ -135,19 +160,21 @@ def generate_audio_gtts(text, voice_type, speech_rate, language):
         os.remove(temp_path)
         temp_path = adjusted_path
     
+    logger.info(f'gTTS audio generated at {temp_path}')
     return temp_path
 
 
 def generate_audio_elevenlabs(text, voice_type, language='en'):
     """Generate audio using ElevenLabs TTS."""
+    logger.info('Generating audio with ElevenLabs')
+    
     # Set API key
     set_api_key(settings.ELEVENLABS_API_KEY)
     
     # Map voice_type to ElevenLabs voice IDs
-    # You can get voice IDs from: https://api.elevenlabs.io/v1/voices
     voice_map = {
-        'male': 'pNInz6obpgDQGcFmaJgB',  # Adam
-        'female': 'EXAVITQu4vr4xnSDxMaL',  # Bella
+        'male': 'pNInz6obpgDQGcFmaJgB',
+        'female': 'EXAVITQu4vr4xnSDxMaL',
     }
     
     voice_id = voice_map.get(voice_type, voice_map['female'])
@@ -172,6 +199,7 @@ def generate_audio_elevenlabs(text, voice_type, language='en'):
         for segment in audio_segments:
             temp_file.write(segment)
     
+    logger.info(f'ElevenLabs audio generated at {temp_path}')
     return temp_path
 
 
@@ -181,9 +209,6 @@ def generate_audio_gemini(text, voice_type, speech_rate, language='en'):
     Uses Gemini to enhance/summarize text, then converts to audio via gTTS.
     This provides better quality output by processing the text through an LLM first.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     if not GEMINI_AVAILABLE or not GEMINI_CONFIGURED:
         logger.warning('Gemini not configured. Falling back to gTTS.')
         return generate_audio_gtts(text, voice_type, speech_rate, language)
@@ -192,9 +217,8 @@ def generate_audio_gemini(text, voice_type, speech_rate, language='en'):
         # Configure Gemini API
         genai.configure(api_key=settings.GEMINI_API_KEY)
         
-        # Use Gemini to enhance/improve the text for better TTS output
-        # Request Gemini to clean up the text and make it more suitable for speech
-        model = genai.GenerativeModel('gemini-pro')
+        # Use the current Gemini 1.5 Flash model
+        model = genai.GenerativeModel("models/gemini-2.5-flash")
         
         # Create a prompt to enhance text for TTS
         prompt = f"""You are an expert in preparing text for text-to-speech conversion.
@@ -213,23 +237,17 @@ Reformatted text:"""
         
         # Call Gemini to enhance text
         logger.info('Calling Gemini API to enhance text for TTS...')
-        response = model.generate_content(prompt, safety_settings=[
-            {
-                "category": "HARM_CATEGORY_UNSPECIFIED",
-                "threshold": "BLOCK_NONE"
-            },
-        ])
+        response = model.generate_content(prompt)
         
         if not response or not response.text:
             logger.warning('Gemini returned empty response. Using original text.')
             enhanced_text = text
         else:
             enhanced_text = response.text.strip()
-            logger.info(f'Gemini enhanced text for TTS (original: {len(text)} chars, enhanced: {len(enhanced_text)} chars)')
+            logger.info(f'Gemini enhanced text (original: {len(text)} chars, enhanced: {len(enhanced_text)} chars)')
         
         # Now use gTTS with the enhanced text
-        # This combines Gemini's text processing with gTTS's audio generation
-        logger.info('Generating audio with gTTS...')
+        logger.info('Generating audio with gTTS using enhanced text...')
         tts = gTTS(text=enhanced_text, lang=language, slow=(speech_rate < 1.0))
         
         # Save to temporary file
@@ -259,52 +277,7 @@ Reformatted text:"""
         
     except Exception as e:
         logger.error(f'Gemini TTS conversion failed: {str(e)}. Falling back to gTTS.', exc_info=True)
-        # Fallback to gTTS if Gemini fails
         return generate_audio_gtts(text, voice_type, speech_rate, language)
-
-
-@shared_task
-def send_conversion_complete_email(user_id, document_title, audio_id):
-    """Send email notification when conversion is complete."""
-    try:
-        from users.models import CustomUser
-        user = CustomUser.objects.get(id=user_id)
-        
-        if user.email:
-            send_mail(
-                subject='Audio Conversion Complete',
-                message=f'Your document "{document_title}" has been converted to audio successfully!',
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=True,
-            )
-    except Exception as e:
-        # Log error but don't fail the task
-        print(f"Failed to send email: {e}")
-        # Clean up temp file
-        os.remove(temp_path)
-        
-        # Send email notification
-        send_conversion_complete_email.delay(user_id, document.title, audio_file.id)
-        
-        return {
-            'status': 'success',
-            'audio_file_id': audio_file.id,
-            'duration': duration
-        }
-        
-    except Document.DoesNotExist:
-        return {'status': 'error', 'message': 'Document not found'}
-    
-    except Exception as e:
-        # Update audio file status
-        if 'audio_file' in locals():
-            audio_file.status = AudioFile.Status.FAILED
-            audio_file.error_message = str(e)
-            audio_file.save()
-        
-        # Retry task
-        raise self.retry(exc=e, countdown=60)
 
 
 @shared_task
@@ -350,9 +323,10 @@ EduVoice Team
             fail_silently=True
         )
         
+        logger.info(f'Conversion complete email sent to user {user_id}')
+        
     except Exception as e:
-        # Log error but don't fail
-        print(f"Error sending email: {str(e)}")
+        logger.error(f'Error sending email: {str(e)}', exc_info=True)
 
 
 @shared_task
@@ -377,12 +351,15 @@ def cleanup_old_audio_files():
             audio_file.delete()
             deleted_count += 1
         
+        logger.info(f'Cleaned up {deleted_count} old audio files')
+        
         return {
             'status': 'success',
             'deleted_count': deleted_count
         }
         
     except Exception as e:
+        logger.error(f'Error cleaning up audio files: {str(e)}', exc_info=True)
         return {
             'status': 'error',
             'message': str(e)

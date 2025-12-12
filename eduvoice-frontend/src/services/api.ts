@@ -178,7 +178,14 @@ export const documentsAPI = {
     );
     return response.data;
   },
+  getAudioFiles: async (id: number): Promise<AudioFile[]> => {
+  const response: AxiosResponse<AudioFile[]> = await api.get(`/documents/${id}/audio_files/`);
+  return response.data;
+},
+
 };
+
+
 
 // Courses API
 export const coursesAPI = {
@@ -283,5 +290,6 @@ export const analyticsAPI = {
     });
   },
 };
+
 
 export default api;

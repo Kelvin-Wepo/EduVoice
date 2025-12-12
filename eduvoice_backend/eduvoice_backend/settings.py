@@ -243,4 +243,4 @@ TTS_SPEED_MAX = 2.0
 # ElevenLabs TTS Configuration (Optional - for premium quality voices)
 ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY', '')
 # Gemini (Google) API key (Optional) - useful if integrating Gemini-based TTS or parsing
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_API_KEY='AIzaSyCA9CFVii3LP1Rgaua89r3wGDk-bSQ8HP0'

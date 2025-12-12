@@ -6,6 +6,8 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
@@ -90,31 +92,133 @@ class AudioFileViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
     
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[])
     def stream(self, request, pk=None):
-        """Stream audio file."""
-        audio_file = self.get_object()
+        """
+        Stream audio file with token authentication.
+        Accepts token as query parameter for HTML5 audio compatibility.
+        """
+        # Handle token from query parameter (for audio/video elements)
+        token = request.query_params.get('token')
         
+        if token:
+            try:
+                # Validate JWT token
+                jwt_auth = JWTAuthentication()
+                validated_token = jwt_auth.get_validated_token(token)
+                user = jwt_auth.get_user(validated_token)
+                request.user = user
+            except (InvalidToken, TokenError) as e:
+                return HttpResponse(
+                    'Invalid or expired token',
+                    status=401,
+                    content_type='text/plain'
+                )
+        elif not request.user.is_authenticated:
+            return HttpResponse(
+                'Authentication required',
+                status=401,
+                content_type='text/plain'
+            )
+        
+        # Get audio file
+        try:
+            audio_file = AudioFile.objects.get(pk=pk)
+        except AudioFile.DoesNotExist:
+            return HttpResponse(
+                'Audio file not found',
+                status=404,
+                content_type='text/plain'
+            )
+        
+        # Check if user has access to this audio file's document
+        user = request.user
+        document = audio_file.document
+        
+        has_access = False
+        if user.is_admin_role:
+            has_access = True
+        elif document.is_public:
+            has_access = True
+        elif document.uploaded_by == user:
+            has_access = True
+        elif user.is_teacher:
+            has_access = True
+        elif document.course and document.course in user.enrolled_courses.all():
+            has_access = True
+        
+        if not has_access:
+            return HttpResponse(
+                'Access denied',
+                status=403,
+                content_type='text/plain'
+            )
+        
+        # Check if file exists
         if not audio_file.audio_file:
-            return Response(
-                {'error': 'Audio file not available.'},
-                status=status.HTTP_404_NOT_FOUND
+            return HttpResponse(
+                'Audio file not available',
+                status=404,
+                content_type='text/plain'
             )
         
         file_path = audio_file.audio_file.path
         
-        if os.path.exists(file_path):
+        if not os.path.exists(file_path):
+            return HttpResponse(
+                'File not found on disk',
+                status=404,
+                content_type='text/plain'
+            )
+        
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        # Handle range requests for seeking in audio
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        
+        if range_header:
+            # Parse range header
+            range_match = range_header.replace('bytes=', '').split('-')
+            start = int(range_match[0]) if range_match[0] else 0
+            end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else file_size - 1
+            
+            # Open file and seek to start position
+            file_handle = open(file_path, 'rb')
+            file_handle.seek(start)
+            
+            # Create partial content response
+            response = HttpResponse(
+                file_handle.read(end - start + 1),
+                status=206,
+                content_type='audio/mpeg'
+            )
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Content-Length'] = str(end - start + 1)
+            response['Accept-Ranges'] = 'bytes'
+        else:
+            # Serve entire file
             response = FileResponse(
                 open(file_path, 'rb'),
                 content_type='audio/mpeg'
             )
-            response['Content-Disposition'] = 'inline'
-            return response
-        else:
-            return Response(
-                {'error': 'File not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            response['Content-Length'] = str(file_size)
+            response['Accept-Ranges'] = 'bytes'
+        
+        # Add headers for inline playback
+        response['Content-Disposition'] = 'inline'
+        response['Cache-Control'] = 'public, max-age=3600'
+        
+        # Add CORS headers for audio streaming
+        origin = request.META.get('HTTP_ORIGIN')
+        if origin:
+            response['Access-Control-Allow-Origin'] = origin
+            response['Access-Control-Allow-Credentials'] = 'true'
+            response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response['Access-Control-Allow-Headers'] = 'Range, Authorization'
+            response['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges'
+        
+        return response
     
     @action(detail=True, methods=['get'])
     def status(self, request, pk=None):

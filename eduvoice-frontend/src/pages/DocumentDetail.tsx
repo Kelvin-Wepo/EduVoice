@@ -42,16 +42,19 @@ export const DocumentDetail: React.FC = () => {
       const docData = await documentsAPI.get(parseInt(id!));
       setDocument(docData);
 
-      // Check if audio file exists
-      if (docData.audio_file) {
-        try {
-          const audioData = await audioAPI.get(docData.audio_file);
-          setAudioFile(audioData);
-        } catch (error) {
-          console.log('No audio file yet');
+      // Fetch audio files for this document using the new endpoint
+      try {
+        const audioFiles = await documentsAPI.getAudioFiles(parseInt(id!));
+        if (audioFiles && audioFiles.length > 0) {
+          // Get the most recent completed audio file
+          setAudioFile(audioFiles[0]);
+        } else {
+          setAudioFile(null);
+          setAutoPlayAudio(false);
         }
-      } else {
-        // Reset autoPlay if no audio file
+      } catch (error) {
+        console.log('No audio files found for this document');
+        setAudioFile(null);
         setAutoPlayAudio(false);
       }
     } catch (error) {
